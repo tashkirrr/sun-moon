@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>For Ramisha</title>
+<style>
+  :root { --bg: #04050a; --ink: #efe6d8; --dim: #9a9aae; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--bg); color: var(--ink); }
+  body { display: flex; flex-direction: column; font-family: Georgia, "Times New Roman", serif;
+         padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  header, footer { text-align: center; padding: 0 1.25rem; animation: rise 2.4s ease-out both; }
+  header { padding-top: clamp(1.25rem, 5vh, 3rem); }
+  h1 { margin: 0; font-weight: 400; font-size: clamp(1.8rem, 5vw, 3rem); letter-spacing: .02em; }
+  main { flex: 1; min-height: 0; position: relative; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  footer { padding-bottom: clamp(1.25rem, 5vh, 3rem); animation-delay: 1.2s; }
+  #msg { margin: 0 auto; max-width: 34rem; font-style: italic; font-size: clamp(1rem, 2.6vw, 1.35rem); line-height: 1.55; }
+  #from { margin: .75rem 0 0; color: var(--dim); font-size: .95rem; }
+  @keyframes rise { from { opacity: 0; } to { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { header, footer { animation: none; } }
+</style>
+</head>
+<body>
+<header><h1 id="title"></h1></header>
+<main><canvas id="c" role="img" aria-label="A sun and a moon drift together, overlap, and pull apart."></canvas></main>
+<footer><p id="msg"></p><p id="from"></p></footer>
+
+<script>
+// Edit these three lines.
+const CONFIG = {
+  name: "Ramisha",
+  from: "Tashkir",
+  message: "The sun and the moon only meet for a few minutes. I'd like more time than that with you."
+};
+
+document.getElementById("title").textContent = "For " + CONFIG.name;
+document.getElementById("msg").textContent = CONFIG.message;
+document.getElementById("from").textContent = "From " + CONFIG.from;
+
+const PERIOD = 16, TAU = Math.PI * 2;
+const SUN_RAMP = ".:;ilt1fYJCT7OQ08@";
+const SUN_STOPS = [0, .4, .7, 1], SUN_RGB = [[150,30,10],[235,100,25],[255,185,60],[255,245,200]];
+const MOON_STOPS = [0, .35, .7, 1], MOON_RGB = [[15,25,80],[40,80,210],[110,160,255],[215,230,255]];
+const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+const smooth = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+  t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function ramp(b, stops, rgb, out, o) {
+  let i = 0; while (i < stops.length - 2 && b > stops[i + 1]) i++;
+  const t = clamp((b - stops[i]) / (stops[i + 1] - stops[i]), 0, 1);
+  for (let k = 0; k < 3; k++) out[o + k] = rgb[i][k] + (rgb[i + 1][k] - rgb[i][k]) * t;
+}
+
+class Scene {
+  constructor(cols, rows, aspect) {
+    const rand = rng(7), n = cols * rows;
+    Object.assign(this, { cols, rows, aspect, W: cols, H: rows * aspect });
+    this.vert = this.H > this.W;          // tall screens: the two bodies move up and down
+    const [along, across] = this.vert ? [this.H, this.W] : [this.W, this.H];
+    this.R = Math.min(across * .36, along * .2);
+    this.d = (along / 2 - this.R) * .92;
+    this.rnd = Float32Array.from({ length: n }, rand);
+    this.thr = Float32Array.from({ length: n }, rand);
+    const ns = Math.max(20, Math.floor(n / 45));
+    this.stars = Array.from({ length: ns }, () => ({ r: Math.floor(rand() * rows), c: Math.floor(rand() * cols),
+      ph: rand() * TAU, k: 1 + Math.floor(rand() * 4), big: rand() < .22 }));
+    this.craters = [[-.35,-.25,.28,.45],[.30,.20,.22,.40],[.05,.55,.18,.35],[-.10,-.60,.15,.30],[.55,-.30,.14,.30],[-.55,.40,.16,.30]];
+    this.ch = new Array(n).fill(" ");
+    this.rgb = new Float32Array(n * 3);
+    this.cover = new Uint8Array(n);
+    this.tmp = new Float32Array(3);
+  }
+
+  frame(tau) {
+    const { cols, rows, aspect, W, H, R, d, rnd, thr, ch, rgb, cover, tmp } = this;
+    const s = Math.sin(tau), c0 = Math.cos(tau), cx = W / 2, cy = H / 2;
+    const bob = .05 * (this.vert ? W : H) * Math.sin(2 * tau);
+    const [sx, sy, mx, my] = this.vert ? [cx + bob, cy - d * c0, cx - bob, cy + d * c0]
+                                       : [cx - d * c0, cy + bob, cx + d * c0, cy - bob];
+    const Rs = R * (1 - .07 * s), Rm = R * (1 + .07 * s), flick = .9 + .1 * Math.sin(3 * tau);
+    let lx = (sx - mx) / Rm, ly = (sy - my) / Rm, lz = 1.6; const ln = Math.hypot(lx, ly, lz); lx /= ln; ly /= ln; lz /= ln;
+    const sunC = [0, 0, 0], moonC = [0, 0, 0];
+
+    for (let r = 0; r < rows; r++) {
+      const Y = (r + .5) * aspect, odd = r % 2 === 1;
+      for (let c = 0; c < cols; c++) {
+        const i = r * cols + c, X = c + .5, o = i * 3;
+        const dS = Math.hypot(X - sx, Y - sy), dM = Math.hypot(X - mx, Y - my);
+        const inS = dS <= Rs, inM = dM <= Rm;
+        cover[i] = inS || inM ? 1 : 0;
+        let chS = " ", chM = " ";
+        if (inS) {
+          const u = (X - sx) / Rs, v = (Y - sy) / Rs, nz = Math.sqrt(Math.max(0, 1 - u * u - v * v));
+          const n = .5 + .25 * Math.sin(5 * u + 2 * tau) * Math.sin(4 * v - tau) + .25 * Math.sin(7 * (u + v) + 3 * tau);
+          const b = clamp(.30 + .70 * Math.pow(nz, .45) + .35 * (n - .5), 0, 1);
+          chS = SUN_RAMP[clamp(Math.floor((b * .98 + (rnd[i] - .5) * .35) * (SUN_RAMP.length - 1)), 0, SUN_RAMP.length - 1)];
+          ramp(b, SUN_STOPS, SUN_RGB, sunC, 0);
+        }
+        if (inM) {
+          const u = (X - mx) / Rm, v = (Y - my) / Rm, nz = Math.sqrt(Math.max(0, 1 - u * u - v * v));
+          const lit = clamp(u * lx + v * ly + nz * lz, 0, 1);
+          let crat = 0;
+          for (const [a, b2, rr, dep] of this.craters) crat += dep * Math.exp(-1.5 * ((u - a) ** 2 + (v - b2) ** 2) / (rr * rr));
+          let b = clamp(.22 + .78 * lit * (1 - clamp(crat, 0, .7)), 0, 1) * (odd ? .78 : 1);
+          chM = b < .12 ? "." : odd ? "-" : "=";
+          ramp(b, MOON_STOPS, MOON_RGB, moonC, 0);
+        }
+        if (inS || inM) {
+          let useMoon = inM;
+          if (inS && inM) useMoon = thr[i] < smooth(-.8, .8, (dS - dM) / R * 1.2 + .9 * s);
+          ch[i] = useMoon ? chM : chS;
+          const src = useMoon ? moonC : sunC;
+          rgb[o] = src[0]; rgb[o + 1] = src[1]; rgb[o + 2] = src[2];
+        } else {
+          const gS = dS / Rs > 1 ? Math.exp(-clamp(dS / Rs - 1, 0, 9) * 3.2) * .55 * flick : 0;
+          const gM = dM / Rm > 1 ? Math.exp(-clamp(dM / Rm - 1, 0, 9) * 3.2) * .45 : 0;
+          const g = Math.max(gS, gM);
+          ch[i] = g > .28 ? ":" : g > .07 ? "." : " ";
+          rgb[o] = (gS * 255 + gM * 90) * .9; rgb[o + 1] = (gS * 150 + gM * 130) * .9; rgb[o + 2] = (gS * 50 + gM * 255) * .9;
+        }
+      }
+    }
+
+    const put = (r, c, g, k, sc) => {
+      if (r < 0 || r >= rows || c < 0 || c >= cols || cover[r * cols + c]) return;
+      const i = r * cols + c; ch[i] = g;
+      rgb[i * 3] = k * .85 * sc; rgb[i * 3 + 1] = k * .9 * sc; rgb[i * 3 + 2] = k * sc;
+    };
+    for (const st of this.stars) {
+      const b = .5 + .5 * Math.sin(st.k * tau + st.ph);
+      if (b < .25 || cover[st.r * cols + st.c]) continue;
+      const k = 60 + 195 * b, flare = st.big && b > .8;
+      put(st.r, st.c, flare ? "+" : b > .6 ? "*" : ".", k, 1);
+      if (flare) for (const [dr, dc, g] of [[-1,0,"|"],[1,0,"|"],[0,-1,"-"],[0,1,"-"],[0,-2,"-"],[0,2,"-"]]) put(st.r + dr, st.c + dc, g, k, .55);
+    }
+    return this;
+  }
+}
+
+const canvas = document.getElementById("c"), ctx = canvas.getContext("2d");
+const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+let scene, cw, lh, fs, dpr, colorCache = new Map();
+
+function layout() {
+  const box = canvas.getBoundingClientRect();
+  dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(box.width * dpr); canvas.height = Math.round(box.height * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const target = box.width < box.height ? 60 : 100;
+  fs = clamp(box.width / (target * .6), 7, 16);
+  ctx.font = fs + 'px ui-monospace, "DejaVu Sans Mono", Menlo, Consolas, monospace';
+  ctx.textBaseline = "middle";
+  cw = ctx.measureText("M").width; lh = cw * 2;
+  scene = new Scene(Math.max(30, Math.floor(box.width / cw)), Math.max(16, Math.floor(box.height / lh)), 2);
+  if (still) draw(performance.now());
+}
+
+function draw(now) {
+  const tau = TAU * ((still ? 0.02 * PERIOD * 1000 : now) / 1000 % PERIOD) / PERIOD;
+  const { cols, rows, ch, rgb } = scene.frame(tau);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const ox = (canvas.width / dpr - cols * cw) / 2, oy = (canvas.height / dpr - rows * lh) / 2;
+  let last = -1;
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const i = r * cols + c, g = ch[i];
+    if (g === " ") continue;
+    const key = ((rgb[i * 3] & 0xF8) << 16) | ((rgb[i * 3 + 1] & 0xF8) << 8) | (rgb[i * 3 + 2] & 0xF8);
+    if (key !== last) {
+      let col = colorCache.get(key);
+      if (!col) { col = "rgb(" + (key >> 16) + "," + (key >> 8 & 255) + "," + (key & 255) + ")"; colorCache.set(key, col); }
+      ctx.fillStyle = col; last = key;
+    }
+    ctx.fillText(g, ox + c * cw, oy + (r + .5) * lh);
+  }
+}
+
+function loop(now) { draw(now); requestAnimationFrame(loop); }
+new ResizeObserver(layout).observe(canvas);
+layout();
+if (!still) requestAnimationFrame(loop);
+</script>
+</body>
+</html>
